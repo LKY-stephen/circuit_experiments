@@ -8,7 +8,7 @@ pub struct DemoConfig1 {
     arth_config: ArthConfig,
 }
 
-// x^3+x+c=y
+// (x^3+x)y=z
 #[derive(Default)]
 pub struct DemoCircuit1 {
     x: Value<Fp>,
