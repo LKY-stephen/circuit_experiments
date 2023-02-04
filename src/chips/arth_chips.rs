@@ -1,28 +1,31 @@
+use std::marker::PhantomData;
+
 use halo2_proofs::{
+    arithmetic::{Field, FieldExt},
     circuit::{AssignedCell, Chip, Layouter, Region, Value},
-    pasta::Fp,
     plonk::{Advice, Column, ConstraintSystem, Error, Instance, Selector},
     poly::Rotation,
 };
 
-/// A variable representing a number.
 #[derive(Clone)]
-pub struct Number(AssignedCell<Fp, Fp>);
+pub struct Number<F: Field> {
+    value: AssignedCell<F, F>,
+}
 
-pub trait NumericInstructions: Chip<Fp> {
+pub trait NumericInstructions<F: FieldExt>: Chip<F> {
     /// Variable representing a number.
     type Num;
 
     /// Loads a number into the circuit as a private input.
-    fn load_private(&self, layouter: impl Layouter<Fp>, a: Value<Fp>) -> Result<Self::Num, Error>;
+    fn load_private(&self, layouter: impl Layouter<F>, a: Value<F>) -> Result<Self::Num, Error>;
 
     /// Loads a number into the circuit as a fixed constant.
-    fn load_public(&self, layouter: impl Layouter<Fp>, row: usize) -> Result<Self::Num, Error>;
+    fn load_public(&self, layouter: impl Layouter<F>, row: usize) -> Result<Self::Num, Error>;
 
     /// Returns `c = a * b`.
     fn mul(
         &self,
-        layouter: impl Layouter<Fp>,
+        layouter: impl Layouter<F>,
         a: Self::Num,
         b: Self::Num,
     ) -> Result<Self::Num, Error>;
@@ -30,21 +33,25 @@ pub trait NumericInstructions: Chip<Fp> {
     /// Returns `c = a + b`.
     fn add(
         &self,
-        layouter: impl Layouter<Fp>,
+        layouter: impl Layouter<F>,
         a: Self::Num,
         b: Self::Num,
     ) -> Result<Self::Num, Error>;
 
+    /// Returns `c = a ^ 3`.
+    fn cube(&self, layouter: impl Layouter<F>, a: Self::Num) -> Result<Self::Num, Error>;
+
     fn expose_public(
         &self,
-        layouter: impl Layouter<Fp>,
+        layouter: impl Layouter<F>,
         num: Self::Num,
         row: usize,
     ) -> Result<(), Error>;
 }
 
-pub struct ArthChip {
+pub struct ArthChip<F: Field> {
     config: ArthConfig,
+    _marker: PhantomData<F>,
 }
 
 #[derive(Clone, Debug)]
@@ -58,24 +65,29 @@ pub struct ArthConfig {
     // selectors to enable the gate
     s_mul: Selector,
     s_add: Selector,
+    s_cube: Selector,
 }
 
-impl ArthChip {
+impl<F: FieldExt> ArthChip<F> {
     pub fn new(config: ArthConfig) -> Self {
-        ArthChip { config }
+        ArthChip {
+            config,
+            _marker: PhantomData,
+        }
     }
 
     pub fn configure(
-        meta: &mut ConstraintSystem<Fp>,
+        meta: &mut ConstraintSystem<F>,
         advice: [Column<Advice>; 2],
         instance: Column<Instance>,
-    ) -> <Self as Chip<Fp>>::Config {
+    ) -> <Self as Chip<F>>::Config {
         meta.enable_equality(instance);
         for column in &advice {
             meta.enable_equality(*column);
         }
         let s_mul = meta.selector();
         let s_add = meta.selector();
+        let s_cube = meta.selector();
 
         // Define our multiplication gate!
         meta.create_gate("mul", |meta| {
@@ -116,22 +128,37 @@ impl ArthChip {
             vec![s_add * (lhs + rhs - out)]
         });
 
+        meta.create_gate("cube", |meta| {
+            //
+            // | a0  | s_add |
+            // |-----|-------|
+            // | lhs | s_add |
+            // | out |       |
+
+            let lhs = meta.query_advice(advice[0], Rotation::cur());
+            let out = meta.query_advice(advice[0], Rotation::next());
+            let s_pow3 = meta.query_selector(s_cube);
+
+            vec![s_pow3 * (lhs.clone() * lhs.clone() * lhs - out)]
+        });
+
         ArthConfig {
             advice,
             instance,
             s_mul,
             s_add,
+            s_cube,
         }
     }
 }
 
-impl NumericInstructions for ArthChip {
-    type Num = Number;
+impl<F: FieldExt> NumericInstructions<F> for ArthChip<F> {
+    type Num = Number<F>;
 
     fn load_private(
         &self,
-        mut layouter: impl Layouter<Fp>,
-        value: Value<Fp>,
+        mut layouter: impl Layouter<F>,
+        value: Value<F>,
     ) -> Result<Self::Num, Error> {
         let config = self.config();
 
@@ -140,12 +167,12 @@ impl NumericInstructions for ArthChip {
             |mut region| {
                 region
                     .assign_advice(|| "private input", config.advice[0], 0, || value)
-                    .map(Number)
+                    .map(|x| Number { value: x })
             },
         )
     }
 
-    fn load_public(&self, mut layouter: impl Layouter<Fp>, row: usize) -> Result<Self::Num, Error> {
+    fn load_public(&self, mut layouter: impl Layouter<F>, row: usize) -> Result<Self::Num, Error> {
         let config = self.config();
 
         layouter.assign_region(
@@ -159,14 +186,14 @@ impl NumericInstructions for ArthChip {
                         config.advice[0],
                         0,
                     )
-                    .map(Number)
+                    .map(|x| Number { value: x })
             },
         )
     }
 
     fn mul(
         &self,
-        mut layouter: impl Layouter<Fp>,
+        mut layouter: impl Layouter<F>,
         a: Self::Num,
         b: Self::Num,
     ) -> Result<Self::Num, Error> {
@@ -174,7 +201,7 @@ impl NumericInstructions for ArthChip {
 
         layouter.assign_region(
             || "mul",
-            |mut region: Region<'_, Fp>| {
+            |mut region: Region<'_, F>| {
                 // We only want to use a single multiplication gate in this region,
                 // so we enable it at region offset 0; this means it will constrain
                 // cells at offsets 0 and 1.
@@ -184,25 +211,27 @@ impl NumericInstructions for ArthChip {
                 // but we can only rely on relative offsets inside this region. So we
                 // assign new cells inside the region and constrain them to have the
                 // same values as the inputs.
-                a.0.copy_advice(|| "lhs", &mut region, config.advice[0], 0)?;
-                b.0.copy_advice(|| "rhs", &mut region, config.advice[1], 0)?;
+                a.value
+                    .copy_advice(|| "lhs", &mut region, config.advice[0], 0)?;
+                b.value
+                    .copy_advice(|| "rhs", &mut region, config.advice[1], 0)?;
 
                 // Now we can assign the multiplication result, which is to be assigned
                 // into the output position.
-                let value = a.0.value().copied() * b.0.value();
+                let value = a.value.value().copied() * b.value.value();
 
                 // Finally, we do the assignment to the output, returning a
                 // variable to be used in another part of the circuit.
                 region
                     .assign_advice(|| "lhs * rhs", config.advice[0], 1, || value)
-                    .map(Number)
+                    .map(|x| Number { value: x })
             },
         )
     }
 
     fn add(
         &self,
-        mut layouter: impl Layouter<Fp>,
+        mut layouter: impl Layouter<F>,
         a: Self::Num,
         b: Self::Num,
     ) -> Result<Self::Num, Error> {
@@ -210,7 +239,7 @@ impl NumericInstructions for ArthChip {
 
         layouter.assign_region(
             || "add",
-            |mut region: Region<'_, Fp>| {
+            |mut region: Region<'_, F>| {
                 // We only want to use a single adddition gate in this region,
                 // so we enable it at region offset 0; this means it will constrain
                 // cells at offsets 0 and 1.
@@ -220,35 +249,57 @@ impl NumericInstructions for ArthChip {
                 // but we can only rely on relative offsets inside this region. So we
                 // assign new cells inside the region and constrain them to have the
                 // same values as the inputs.
-                a.0.copy_advice(|| "lhs", &mut region, config.advice[0], 0)?;
-                b.0.copy_advice(|| "rhs", &mut region, config.advice[1], 0)?;
+                a.value
+                    .copy_advice(|| "lhs", &mut region, config.advice[0], 0)?;
+                b.value
+                    .copy_advice(|| "rhs", &mut region, config.advice[1], 0)?;
 
                 // Now we can assign the adddition result, which is to be assigned
                 // into the output position.
-                let value = a.0.value().copied() + b.0.value();
+                let value = a.value.value().copied() + b.value.value();
 
                 // Finally, we do the assignment to the output, returning a
                 // variable to be used in another part of the circuit.
                 region
                     .assign_advice(|| "lhs + rhs", config.advice[0], 1, || value)
-                    .map(Number)
+                    .map(|x| Number { value: x })
+            },
+        )
+    }
+
+    fn cube(&self, mut layouter: impl Layouter<F>, a: Self::Num) -> Result<Self::Num, Error> {
+        let config = self.config();
+
+        layouter.assign_region(
+            || "pow3",
+            |mut region: Region<'_, F>| {
+                config.s_cube.enable(&mut region, 0)?;
+
+                a.value
+                    .copy_advice(|| "lhs", &mut region, config.advice[0], 0)?;
+
+                let value = a.value.value().copied().to_field().cube().evaluate();
+
+                region
+                    .assign_advice(|| "lhs ^ 3", config.advice[0], 1, || value)
+                    .map(|x| Number { value: x })
             },
         )
     }
 
     fn expose_public(
         &self,
-        mut layouter: impl Layouter<Fp>,
+        mut layouter: impl Layouter<F>,
         num: Self::Num,
         row: usize,
     ) -> Result<(), Error> {
         let config = self.config();
 
-        layouter.constrain_instance(num.0.cell(), config.instance, row)
+        layouter.constrain_instance(num.value.cell(), config.instance, row)
     }
 }
 
-impl Chip<Fp> for ArthChip {
+impl<F: FieldExt> Chip<F> for ArthChip<F> {
     type Config = ArthConfig;
 
     type Loaded = ();
