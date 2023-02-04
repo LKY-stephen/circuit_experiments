@@ -1,3 +1,5 @@
+mod utils;
+
 use circuit_samples::circuits::*;
 use halo2_proofs::dev::MockProver;
 use halo2_proofs::pasta::Fp;

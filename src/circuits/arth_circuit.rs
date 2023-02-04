@@ -1,5 +1,5 @@
 use super::super::chips::arth_chips::*;
-use halo2_proofs::arithmetic::{Field, FieldExt};
+use halo2_proofs::arithmetic::FieldExt;
 use halo2_proofs::circuit::{SimpleFloorPlanner, Value};
 use halo2_proofs::plonk::Circuit;
 
@@ -10,7 +10,7 @@ pub struct DemoConfig1 {
 
 // (x^3+x)y=z
 #[derive(Default)]
-pub struct DemoCircuit1<F: Field> {
+pub struct DemoCircuit1<F: FieldExt> {
     x: Value<F>,
 }
 

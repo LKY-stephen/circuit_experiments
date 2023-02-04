@@ -1,14 +1,14 @@
 use std::marker::PhantomData;
 
 use halo2_proofs::{
-    arithmetic::{Field, FieldExt},
+    arithmetic::FieldExt,
     circuit::{AssignedCell, Chip, Layouter, Region, Value},
     plonk::{Advice, Column, ConstraintSystem, Error, Instance, Selector},
     poly::Rotation,
 };
 
 #[derive(Clone)]
-pub struct Number<F: Field> {
+pub struct Number<F: FieldExt> {
     value: AssignedCell<F, F>,
 }
 
@@ -49,7 +49,7 @@ pub trait NumericInstructions<F: FieldExt>: Chip<F> {
     ) -> Result<(), Error>;
 }
 
-pub struct ArthChip<F: Field> {
+pub struct ArthChip<F: FieldExt> {
     config: ArthConfig,
     _marker: PhantomData<F>,
 }
