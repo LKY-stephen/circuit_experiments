@@ -14,7 +14,7 @@ fn fuction_demo1(#[case] x: u64, #[case] y: u64, #[case] z: u64) {
     let c = Fp::from(y);
     let result = Fp::from(z);
 
-    let circuit = arth_circuits::DemoCircuit1::new(input);
+    let circuit = arth_circuit::DemoCircuit1::new(input);
 
     let public_inputs = vec![c, result];
 
@@ -25,4 +25,11 @@ fn fuction_demo1(#[case] x: u64, #[case] y: u64, #[case] z: u64) {
     } else {
         assert!(prover.verify().is_err());
     }
+}
+
+#[cfg(test)]
+#[rstest]
+// proves y=poseidon(x)
+fn function_poseidon() {
+    // todo!()
 }
