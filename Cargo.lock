@@ -147,6 +147,7 @@ dependencies = [
  "halo2_gadgets",
  "halo2_proofs",
  "light-poseidon",
+ "rand",
  "rand_core",
  "rstest",
 ]
