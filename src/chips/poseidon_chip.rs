@@ -215,11 +215,12 @@ impl<F: FieldExt, const WIDTH: usize> PoseidonInstructions<F, WIDTH> for Poseido
 
         // capacity element
         init.push(F::from_u128(config.capacity));
+
         let states = layouter
             .assign_region(
                 || "initiate states",
                 |mut region| {
-                    let state: Vec<Data<F>> = (0..WIDTH)
+                    let state = (0..WIDTH)
                         .map(|i| {
                             region
                                 .assign_advice(
@@ -231,8 +232,8 @@ impl<F: FieldExt, const WIDTH: usize> PoseidonInstructions<F, WIDTH> for Poseido
                                 .unwrap()
                         })
                         .map(Data)
-                        .collect();
-                    return Ok(States(state.try_into().unwrap()));
+                        .collect::<Vec<_>>();
+                    Ok(States(state.try_into().unwrap()))
                 },
             )
             .unwrap();
@@ -266,29 +267,41 @@ impl<F: FieldExt, const WIDTH: usize> PoseidonInstructions<F, WIDTH> for Poseido
                     )?;
                 }
 
-                let mut results: Vec<Data<F>> = Vec::with_capacity(WIDTH);
-                for i in 0..rate {
-                    region.assign_advice(
-                        || format!("load inputs {i}"),
-                        config.state[i],
-                        1,
-                        || inputs[i],
-                    )?;
-
-                    results.push(Data(region.assign_advice(
-                        || format!("load outputs {i}"),
-                        config.state[i],
-                        2,
-                        || states.0[i].0.value().copied() + inputs[i],
-                    )?));
-                }
-
-                results.push(Data(region.assign_advice(
-                    || format!("load outputs {rate}"),
-                    config.state[rate],
-                    2,
-                    || states.0[rate].0.value().copied(),
-                )?));
+                let results = (0..WIDTH)
+                    .map(|i| {
+                        if i < rate {
+                            region
+                                .assign_advice(
+                                    || format!("load inputs {i}"),
+                                    config.state[i],
+                                    1,
+                                    || inputs[i],
+                                )
+                                .unwrap();
+                            Data(
+                                region
+                                    .assign_advice(
+                                        || format!("load outputs {i}"),
+                                        config.state[i],
+                                        2,
+                                        || states.0[i].0.value().copied() + inputs[i],
+                                    )
+                                    .unwrap(),
+                            )
+                        } else {
+                            Data(
+                                region
+                                    .assign_advice(
+                                        || format!("load outputs {rate}"),
+                                        config.state[rate],
+                                        2,
+                                        || states.0[rate].0.value().copied(),
+                                    )
+                                    .unwrap(),
+                            )
+                        }
+                    })
+                    .collect::<Vec<_>>();
 
                 Ok(States(results.try_into().unwrap()))
             },
