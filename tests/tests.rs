@@ -1,4 +1,5 @@
 mod utils;
+use crate::utils::p128_pow5_t3::P128Pow5T3;
 use circuit_samples::circuits::poseidon_circuit::utils::Spec;
 use circuit_samples::circuits::*;
 use halo2_proofs::arithmetic::FieldExt;
@@ -6,7 +7,6 @@ use halo2_proofs::dev::MockProver;
 use halo2_proofs::pasta::Fp;
 use rand::prelude::*;
 use rstest::rstest;
-use utils::P128Pow5T3;
 
 #[cfg(test)]
 #[rstest]
