@@ -49,7 +49,7 @@ fn function_poseidon(#[case] n: usize) {
         + <P128Pow5T3 as Spec<Fp, 3>>::partial_rounds())
         * (<P128Pow5T3 as Spec<Fp, 3>>::element_size() + n)
         + 3 * n;
-    let degree = row_n.ilog2() + 1;
+    let degree = (row_n as f32).log2().ceil() as u32;
     let mut rng = rand::thread_rng();
     let inputs: Vec<Fp> = (0..n)
         .map(|_| <Fp as FieldExt>::from_u128(rng.gen::<u128>()))
