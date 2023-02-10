@@ -270,7 +270,7 @@ impl<F: FieldExt, const WIDTH: usize> PoseidonInstructions<F, WIDTH> for Poseido
                         Data(
                             region
                                 .assign_advice(
-                                    || format!("load value as inputs {i}"),
+                                    || format!("load inputs {i}"),
                                     config.state[i],
                                     1,
                                     || inputs[i].clone(),

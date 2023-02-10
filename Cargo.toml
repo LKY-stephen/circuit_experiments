@@ -9,6 +9,7 @@ license = "MIT/Apache-2.0"
 [dependencies]
 halo2_proofs="0.2.0"
 rstest = "0.16.0"
+bitvec = "1.0.1"
 
 [dev-dependencies]
 light-poseidon = "0.0.3"
