@@ -65,30 +65,36 @@ impl<F: FieldExt, S: Spec<F, W> + Clone + Default, const W: usize> Circuit<F>
         config: PoseidonConfig<F, S, W>,
         mut layouter: impl Layouter<F>,
     ) -> Result<(), Error> {
+        let size = S::element_size();
         let chip = PoseidonChip::new(config.arth_config);
         let length = self.x.len();
+        let input_counts = length / size;
+        assert_eq!(length % size, 0);
+        assert!(input_counts > 0);
         let mut state = chip.initiate(&mut layouter)?;
         let fr = S::full_rounds();
         let pr = S::partial_rounds();
-        for i in 0..length {
-            // pad
-            let mut input = vec![self.x[i].clone()];
-            input.append(&mut S::pad().into_iter().map(Value::known).collect());
 
+        // chunks and pad
+        let inputs = self
+            .x
+            .chunks(size)
+            .map(|c| {
+                c.to_vec()
+                    .into_iter()
+                    .chain(S::pad().into_iter().map(|v| Value::known(v.to_owned())))
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
+
+        for x in inputs {
             // abosrb
-            state = chip.load_inputs(&mut layouter, state.clone(), &input)?;
+            (state, _) = chip.load_inputs(&mut layouter, state.clone(), &x)?;
             state = chip.permutation(&mut layouter, state, fr, pr)?;
         }
 
         // squeeze
-        let output_size = S::squeeze_rounds();
-        let mut i = 0;
-        chip.expose_public(&mut layouter, state.clone(), i)?;
-        while i < output_size - 1 {
-            state = chip.permutation(&mut layouter, state, fr, pr)?;
-            i = i + 1;
-            chip.expose_public(&mut layouter, state.clone(), i)?;
-        }
+        chip.expose_public(&mut layouter, state.clone(), size)?;
 
         return Ok(());
     }
