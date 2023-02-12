@@ -33,10 +33,10 @@ impl Spec<Fp, 3> for P128Pow5T3 {
     }
 
     fn pad() -> Vec<Fp> {
-        vec![Fp::one()]
+        vec![]
     }
 
-    fn squeeze_rounds() -> usize {
+    fn element_size() -> usize {
         2
     }
 }

@@ -6,23 +6,23 @@ pub fn hash<F: FieldExt, S: Spec<F, W>, const W: usize>(inputs: Vec<F>) -> Resul
     // initate states [0,0,...., capacity]
     let mut states = [F::zero(); W];
     states[W - 1] = F::from_u128(S::capacity());
+    let size = S::element_size();
 
-    // absorb add [x, pad[0], ...,pad[W-2]] to state and then do permutation
-    for x in inputs {
-        let padded: Vec<F> = vec![x].into_iter().chain(S::pad()).collect::<Vec<_>>();
+    let elements = inputs
+        .chunks(size)
+        .map(|c| c.to_vec().into_iter().chain(S::pad()).collect::<Vec<_>>())
+        .collect::<Vec<_>>();
+
+    // absorb add inputs to state and then do permutation
+    for x in elements {
         for i in 0..W - 1 {
-            states[i] = states[i] + padded[i];
+            states[i] = states[i] + x[i];
         }
         states = permutation::<F, S, W>(states);
     }
 
     //squezze
-    let output_size = S::squeeze_rounds();
-    let mut results: Vec<F> = vec![states[0]];
-    for _ in 0..output_size - 1 {
-        states = permutation::<F, S, W>(states);
-        results.push(states[0]);
-    }
+    let results: Vec<F> = states[0..size].to_vec();
     return Ok(results);
 }
 

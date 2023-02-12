@@ -34,10 +34,9 @@ fn fuction_demo1(#[case] x: u64, #[case] y: u64, #[case] z: u64) {
 
 #[cfg(test)]
 #[rstest]
-#[case(1)]
 #[case(2)]
-#[case(3)]
-#[case(5)]
+#[case(4)]
+#[case(6)]
 #[case(10)]
 #[case(100)]
 // proves y=poseidon(x)
@@ -48,9 +47,9 @@ fn function_poseidon(#[case] n: usize) {
 
     let row_n = (<P128Pow5T3 as Spec<Fp, 3>>::full_rounds()
         + <P128Pow5T3 as Spec<Fp, 3>>::partial_rounds())
-        * (<P128Pow5T3 as Spec<Fp, 3>>::squeeze_rounds() + n)
+        * (<P128Pow5T3 as Spec<Fp, 3>>::element_size() + n)
         + 3 * n;
-    let degree = (((row_n as f64).ln()) / ((2 as f64).ln())).round() as u32 + 1;
+    let degree = row_n.ilog2() + 1;
     let mut rng = rand::thread_rng();
     let inputs: Vec<Fp> = (0..n)
         .map(|_| <Fp as FieldExt>::from_u128(rng.gen::<u128>()))

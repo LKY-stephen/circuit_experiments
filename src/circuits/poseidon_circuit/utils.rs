@@ -29,6 +29,6 @@ pub trait Spec<F: FieldExt, const WIDTH: usize>: fmt::Debug {
     // Return the Pad Element;
     fn pad() -> Vec<F>;
 
-    // fixed rounds for squeezing.
-    fn squeeze_rounds() -> usize;
+    // element size
+    fn element_size() -> usize;
 }

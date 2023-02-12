@@ -31,7 +31,7 @@ pub trait PoseidonInstructions<F: FieldExt, const WIDTH: usize>: Chip<F> {
         layouter: &mut impl Layouter<F>,
         states: Self::State,
         inputs: &Vec<Value<F>>,
-    ) -> Result<Self::State, Error>;
+    ) -> Result<(Self::State, Vec<Self::Data>), Error>;
 
     // permutation with given number of full rounds and partial rounds
     fn permutation(
@@ -47,7 +47,7 @@ pub trait PoseidonInstructions<F: FieldExt, const WIDTH: usize>: Chip<F> {
         &self,
         layouter: &mut impl Layouter<F>,
         states: Self::State,
-        round: usize,
+        size: usize,
     ) -> Result<(), Error>;
 }
 
@@ -246,13 +246,12 @@ impl<F: FieldExt, const WIDTH: usize> PoseidonInstructions<F, WIDTH> for Poseido
         layouter: &mut impl Layouter<F>,
         states: Self::State,
         inputs: &Vec<Value<F>>,
-    ) -> Result<Self::State, Error> {
+    ) -> Result<(Self::State, Vec<Self::Data>), Error> {
         let config = self.config();
 
         let rate = WIDTH - 1;
         // padding are done at circuit layer
-        assert_eq!(inputs.len(), rate);
-
+        assert_eq!(inputs.len() % rate, 0);
         layouter.assign_region(
             || "load inputs",
             |mut region: Region<'_, F>| {
@@ -266,18 +265,23 @@ impl<F: FieldExt, const WIDTH: usize> PoseidonInstructions<F, WIDTH> for Poseido
                         0,
                     )?;
                 }
-
+                let input_data = (0..rate)
+                    .map(|i| {
+                        Data(
+                            region
+                                .assign_advice(
+                                    || format!("load value as inputs {i}"),
+                                    config.state[i],
+                                    1,
+                                    || inputs[i].clone(),
+                                )
+                                .expect("failed to read inputs"),
+                        )
+                    })
+                    .collect::<Vec<_>>();
                 let results = (0..WIDTH)
                     .map(|i| {
                         if i < rate {
-                            region
-                                .assign_advice(
-                                    || format!("load inputs {i}"),
-                                    config.state[i],
-                                    1,
-                                    || inputs[i],
-                                )
-                                .unwrap();
                             Data(
                                 region
                                     .assign_advice(
@@ -303,7 +307,7 @@ impl<F: FieldExt, const WIDTH: usize> PoseidonInstructions<F, WIDTH> for Poseido
                     })
                     .collect::<Vec<_>>();
 
-                Ok(States(results.try_into().unwrap()))
+                Ok((States(results.try_into().unwrap()), input_data))
             },
         )
     }
@@ -420,11 +424,15 @@ impl<F: FieldExt, const WIDTH: usize> PoseidonInstructions<F, WIDTH> for Poseido
         &self,
         layouter: &mut impl Layouter<F>,
         states: Self::State,
-        round: usize,
+        size: usize,
     ) -> Result<(), Error> {
         let config = self.config();
 
-        layouter.constrain_instance(states.0[0].0.cell(), config.output, round)
+        assert!(size < WIDTH);
+        for i in 0..size {
+            layouter.constrain_instance(states.0[i].0.cell(), config.output, i)?;
+        }
+        return Ok(());
     }
 }
 
