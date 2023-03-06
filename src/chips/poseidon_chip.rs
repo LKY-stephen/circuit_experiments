@@ -10,10 +10,10 @@ use halo2_proofs::{
 };
 
 #[derive(Clone)]
-pub struct States<F: FieldExt, const WIDTH: usize>([Data<F>; WIDTH]);
+pub struct States<F: FieldExt, const WIDTH: usize>(pub [Data<F>; WIDTH]);
 
 #[derive(Debug, Clone)]
-pub struct Data<F: FieldExt>(AssignedCell<F, F>);
+pub struct Data<F: FieldExt>(pub AssignedCell<F, F>);
 
 pub trait PoseidonInstructions<F: FieldExt, const WIDTH: usize>: Chip<F> {
     /// Variable representing a value.
