@@ -47,7 +47,7 @@ pub trait MerklePathInstruction<F: FieldExt, const I: usize>: Chip<F> {
     /// check the final result with index
     fn expose_public(
         &self,
-        layouter: impl Layouter<F>,
+        layouter: &mut impl Layouter<F>,
         num: Self::Node,
         row: usize,
     ) -> Result<(), Error>;
@@ -280,12 +280,12 @@ impl<F: FieldExt, const I: usize> MerklePathInstruction<F, I> for MerklePathChip
                         i,
                     )?;
 
-                    config.s_hash.enable(&mut region, i)?;
+                    config.s_hash.enable(&mut region, i + 1)?;
 
                     region.assign_advice(
                         || "assign copy",
                         config.copy_flag,
-                        i,
+                        i + 1,
                         || Value::known(F::zero()),
                     )?;
                 }
@@ -322,15 +322,15 @@ impl<F: FieldExt, const I: usize> MerklePathInstruction<F, I> for MerklePathChip
                     region.assign_advice(
                         || "assign copy",
                         config.copy_flag,
-                        i,
-                        || Value::known(F::zero()),
+                        i + 1,
+                        || Value::known(F::one()),
                     )?;
                 }
 
                 // finally we put two roots at row m+1
                 //
                 // | left  | right   |    hash    | copy | index|
-                // | root  | root    | root_hash  |  1   |  1   |
+                // | root  | root    | root_hash  |  1   |   -  |
                 // ....
                 let root = (0..I)
                     .map(|j| {
@@ -341,7 +341,9 @@ impl<F: FieldExt, const I: usize> MerklePathInstruction<F, I> for MerklePathChip
                             .copy_advice(|| "assign right", &mut region, config.right[j], m)
                             .expect("failed to get right root value");
                         // root is just a copy
-                        region.constrain_equal(left.cell(), right.cell());
+                        region
+                            .constrain_equal(left.cell(), right.cell())
+                            .expect("the last row must be identical");
                         return left;
                     })
                     .collect::<Vec<_>>()
@@ -355,7 +357,7 @@ impl<F: FieldExt, const I: usize> MerklePathInstruction<F, I> for MerklePathChip
 
     fn expose_public(
         &self,
-        mut layouter: impl Layouter<F>,
+        layouter: &mut impl Layouter<F>,
         num: Self::Node,
         row: usize,
     ) -> Result<(), Error> {
