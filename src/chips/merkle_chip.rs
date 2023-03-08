@@ -42,6 +42,7 @@ pub trait MerklePathInstruction<F: FieldExt, const I: usize>: Chip<F> {
         layouter: &mut impl Layouter<F>,
         left: [AssignedCell<F, F>; I],
         right: [AssignedCell<F, F>; I],
+        index: bool,
     ) -> Result<Self::Node, Error>;
 
     /// check the final result with index
@@ -105,13 +106,13 @@ impl<F: FieldExt, const I: usize> MerklePathChip<F, I> {
         public: Column<Instance>,
     ) -> <Self as Chip<F>>::Config {
         // equality checks for output and internal states
-        for c in &left {
-            meta.enable_equality(*c);
+        for i in 0..I {
+            meta.enable_equality(left[i]);
+            meta.enable_equality(right[i]);
+            meta.enable_equality(hash[i]);
         }
 
-        for c in &right {
-            meta.enable_equality(*c);
-        }
+        meta.enable_equality(index_flag);
 
         let s_hash = meta.selector();
         let s_pub = meta.selector();
@@ -120,7 +121,7 @@ impl<F: FieldExt, const I: usize> MerklePathChip<F, I> {
         let bool_constraint = |v: Expression<F>| v.clone() * (one.clone() - v);
 
         let copy_flag_constraint =
-            |before: Expression<F>, after: Expression<F>| after * (one.clone() - before);
+            |before: Expression<F>, after: Expression<F>| before * (one.clone() - after);
 
         // constraints the hash and copy constraints
         meta.create_gate("Copy_Hash", |meta| {
@@ -285,7 +286,7 @@ impl<F: FieldExt, const I: usize> MerklePathInstruction<F, I> for MerklePathChip
                     region.assign_advice(
                         || "assign copy",
                         config.copy_flag,
-                        i + 1,
+                        i,
                         || Value::known(F::zero()),
                     )?;
                 }
@@ -296,6 +297,14 @@ impl<F: FieldExt, const I: usize> MerklePathInstruction<F, I> for MerklePathChip
                 // | root  | root    | root_hash  |  1   |  1   |
                 // | root  | root    | root_hash  |  1   |  0   |
                 // ....
+
+                // last copy for row n remaining are one
+                region.assign_advice(
+                    || "assign copy",
+                    config.copy_flag,
+                    n,
+                    || Value::known(F::zero()),
+                )?;
 
                 for i in n..m {
                     for j in 0..I {
@@ -334,22 +343,37 @@ impl<F: FieldExt, const I: usize> MerklePathInstruction<F, I> for MerklePathChip
                 // ....
                 let root = (0..I)
                     .map(|j| {
-                        let left = left[m][j]
+                        let left_v = left[m][j]
                             .copy_advice(|| "assign left", &mut region, config.left[j], m)
                             .expect("failed to get left root value");
-                        let right = right[m][j]
+                        // right is just a copy
+                        left[m][j]
                             .copy_advice(|| "assign right", &mut region, config.right[j], m)
                             .expect("failed to get right root value");
-                        // root is just a copy
+                        // root is useless, but we assign a random value for query
                         region
-                            .constrain_equal(left.cell(), right.cell())
-                            .expect("the last row must be identical");
-                        return left;
+                            .assign_advice(
+                                || "assign dump hash",
+                                config.hash[j],
+                                m,
+                                || Value::known(F::one()),
+                            )
+                            .expect("failed to assign hash");
+                        return left_v;
                     })
                     .collect::<Vec<_>>()
                     .try_into()
                     .expect("Failed to compute root");
 
+                // index is not needed now, but we kept them for the
+                // bool constraint
+
+                region.assign_advice(
+                    || "assign index",
+                    config.index_flag,
+                    m,
+                    || Value::known(F::one()),
+                )?;
                 return Ok(Node(root));
             },
         )
@@ -374,6 +398,7 @@ impl<F: FieldExt, const I: usize> MerklePathInstruction<F, I> for MerklePathChip
         layouter: &mut impl Layouter<F>,
         left: [AssignedCell<F, F>; I],
         right: [AssignedCell<F, F>; I],
+        index: bool,
     ) -> Result<Self::Node, Error> {
         let config = self.config();
 
@@ -395,17 +420,13 @@ impl<F: FieldExt, const I: usize> MerklePathInstruction<F, I> for MerklePathChip
                         right[j].copy_advice(|| "assign right", &mut region, config.right[j], 0)?;
                     }
 
-                    let init_index = region
-                        .assign_advice_from_instance(
-                            || "assign index for zero layer",
-                            config.public,
-                            I,
-                            config.index_flag,
-                            0,
-                        )
-                        .unwrap()
-                        .value()
-                        .copied();
+                    region.assign_advice_from_instance(
+                        || "assign index for zero layer",
+                        config.public,
+                        I,
+                        config.index_flag,
+                        0,
+                    )?;
                     region.assign_advice(
                         || "assign copy",
                         config.copy_flag,
@@ -413,27 +434,26 @@ impl<F: FieldExt, const I: usize> MerklePathInstruction<F, I> for MerklePathChip
                         || Value::known(F::zero()),
                     )?;
 
-                    let init_hash_v = Node::<F, I>(
-                        (0..I)
-                            .map(|j| {
-                                region
-                                    .assign_advice(
-                                        || "copy inputs",
-                                        config.hash[j],
-                                        0,
-                                        || {
-                                            left[j].value().copied()
-                                                * (Value::known(F::one()) - init_index.clone())
-                                                + init_index.clone() * right[j].value().copied()
-                                        },
-                                    )
-                                    .expect("failed to assign copied inputs")
-                            })
-                            .collect::<Vec<_>>()
+                    // the constraint gurantees the given index is equal to the instance assigned index.
+
+                    let v = match index {
+                        true => right.clone().map(|a| a.value().copied()),
+                        false => left.clone().map(|a| a.value().copied()),
+                    };
+
+                    let selected = (0..I)
+                        .map(|j| {
+                            region
+                                .assign_advice(|| "copy inputs", config.hash[j], 0, || v[j])
+                                .expect("failed to assign copied inputs")
+                        })
+                        .collect::<Vec<_>>();
+
+                    Ok(Node(
+                        selected
                             .try_into()
-                            .unwrap(),
-                    );
-                    Ok(init_hash_v)
+                            .expect("Failed to compute selected value"),
+                    ))
                 },
             )
             .unwrap();
