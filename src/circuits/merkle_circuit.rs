@@ -29,6 +29,7 @@ pub struct MerklePathCircuit<
 > {
     left: Vec<[Value<F>; I]>,
     right: Vec<[Value<F>; I]>,
+    init_index: bool,
     _marker: PhantomData<S>,
 }
 
@@ -79,7 +80,13 @@ impl<
 
         MerkleConfig {
             merkle_config: MerklePathChip::configure(
-                meta, left, right, hash, copy_flag, index_flag, output,
+                meta,
+                left,
+                right,
+                hash,
+                copy_flag,
+                index_flag,
+                output.clone(),
             ),
             poseidon_config: PoseidonChip::configure(
                 meta,
@@ -188,7 +195,7 @@ impl<
 
         // now process root
 
-        for _ in n..M + 1 {
+        for i in n..M + 1 {
             let s = poseidon_chip
                 .initiate(&mut layouter)
                 .expect("failed to init hasher");
@@ -202,9 +209,6 @@ impl<
                 .load_inputs(&mut layouter, s.clone(), &padded_right[n])
                 .expect("failed to load right root");
 
-            let h = poseidon_chip
-                .permutation(&mut layouter, s, fr, pr)
-                .expect("failed to permutate right root");
             left_nodes.push(
                 l.into_iter()
                     .map(|d| d.0)
@@ -221,20 +225,28 @@ impl<
                     .try_into()
                     .expect("right root is not correct"),
             );
-            hash_nodes.push(
-                h.0.into_iter()
-                    .map(|d| d.0)
-                    .take(I)
-                    .collect::<Vec<_>>()
-                    .try_into()
-                    .expect("hash node is not correct"),
-            );
+
+            if i < M {
+                let h = poseidon_chip
+                    .permutation(&mut layouter, s, fr, pr)
+                    .expect("failed to permutate right root");
+
+                hash_nodes.push(
+                    h.0.into_iter()
+                        .map(|d| d.0)
+                        .take(I)
+                        .collect::<Vec<_>>()
+                        .try_into()
+                        .expect("hash node is not correct"),
+                );
+            }
         }
 
         let selection = merkle_chip.load_leaves(
             &mut layouter,
             left_nodes[0].clone(),
             right_nodes[0].clone(),
+            self.init_index,
         )?;
 
         merkle_chip.expose_public(&mut layouter, selection, 0)?;
@@ -259,7 +271,11 @@ impl<
     /// [left node, right node]
     /// ...
     /// [root, root]
-    pub fn new(left: Vec<Vec<F>>, right: Vec<Vec<F>>) -> MerklePathCircuit<F, S, M, W, I> {
+    pub fn new(
+        left: Vec<Vec<F>>,
+        right: Vec<Vec<F>>,
+        init_index: bool,
+    ) -> MerklePathCircuit<F, S, M, W, I> {
         assert_eq!(left.len(), right.len());
         MerklePathCircuit {
             left: left
@@ -282,6 +298,7 @@ impl<
                         .expect("right inputs error")
                 })
                 .collect(),
+            init_index,
             _marker: PhantomData,
         }
     }
