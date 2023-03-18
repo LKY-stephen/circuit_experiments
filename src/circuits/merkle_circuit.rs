@@ -29,7 +29,6 @@ pub struct MerklePathCircuit<
 > {
     left: Vec<[Value<F>; I]>,
     right: Vec<[Value<F>; I]>,
-    init_index: bool,
     _marker: PhantomData<S>,
 }
 
@@ -242,14 +241,8 @@ impl<
             }
         }
 
-        let selection = merkle_chip.load_leaves(
-            &mut layouter,
-            left_nodes[0].clone(),
-            right_nodes[0].clone(),
-            self.init_index,
-        )?;
+        merkle_chip.load_leaves(&mut layouter, left_nodes[0].clone(), right_nodes[0].clone())?;
 
-        merkle_chip.expose_public(&mut layouter, selection, 0)?;
         let root_node =
             merkle_chip.load_path(&mut layouter, left_nodes, right_nodes, hash_nodes, M, n)?;
 
@@ -271,11 +264,7 @@ impl<
     /// [left node, right node]
     /// ...
     /// [root, root]
-    pub fn new(
-        left: Vec<Vec<F>>,
-        right: Vec<Vec<F>>,
-        init_index: bool,
-    ) -> MerklePathCircuit<F, S, M, W, I> {
+    pub fn new(left: Vec<Vec<F>>, right: Vec<Vec<F>>) -> MerklePathCircuit<F, S, M, W, I> {
         assert_eq!(left.len(), right.len());
         MerklePathCircuit {
             left: left
@@ -298,7 +287,6 @@ impl<
                         .expect("right inputs error")
                 })
                 .collect(),
-            init_index,
             _marker: PhantomData,
         }
     }
