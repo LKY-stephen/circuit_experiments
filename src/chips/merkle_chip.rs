@@ -42,8 +42,7 @@ pub trait MerklePathInstruction<F: FieldExt, const I: usize>: Chip<F> {
         layouter: &mut impl Layouter<F>,
         left: [AssignedCell<F, F>; I],
         right: [AssignedCell<F, F>; I],
-        index: bool,
-    ) -> Result<Self::Node, Error>;
+    ) -> Result<(), Error>;
 
     /// check the final result with index
     fn expose_public(
@@ -204,7 +203,7 @@ impl<F: FieldExt, const I: usize> MerklePathChip<F, I> {
             let index = meta.query_advice(index_flag, Rotation::cur());
             let copy = meta.query_advice(copy_flag, Rotation::cur());
 
-            // copy is left to hash if index is 0 other wise copy the right one
+            // copy left to hash if index is 0 other wise copy the right one
 
             let copy_constraint = (0..I)
                 .map(|i| {
@@ -398,11 +397,10 @@ impl<F: FieldExt, const I: usize> MerklePathInstruction<F, I> for MerklePathChip
         layouter: &mut impl Layouter<F>,
         left: [AssignedCell<F, F>; I],
         right: [AssignedCell<F, F>; I],
-        index: bool,
-    ) -> Result<Self::Node, Error> {
+    ) -> Result<(), Error> {
         let config = self.config();
 
-        let hash = layouter
+        layouter
             .assign_region(
                 || "load inputs",
                 |mut region: Region<'_, F>| {
@@ -414,10 +412,16 @@ impl<F: FieldExt, const I: usize> MerklePathInstruction<F, I> for MerklePathChip
                     // chosen = pub1,pub2, ... pubI
 
                     config.s_pub.enable(&mut region, 0)?;
-
                     for j in 0..I {
                         left[j].copy_advice(|| "assign left", &mut region, config.left[j], 0)?;
                         right[j].copy_advice(|| "assign right", &mut region, config.right[j], 0)?;
+                        region.assign_advice_from_instance(
+                            || "copy selected leaf from instance",
+                            config.public,
+                            j,
+                            config.hash[j],
+                            0,
+                        )?;
                     }
 
                     region.assign_advice_from_instance(
@@ -434,30 +438,11 @@ impl<F: FieldExt, const I: usize> MerklePathInstruction<F, I> for MerklePathChip
                         || Value::known(F::zero()),
                     )?;
 
-                    // the constraint gurantees the given index is equal to the instance assigned index.
-
-                    let v = match index {
-                        true => right.clone().map(|a| a.value().copied()),
-                        false => left.clone().map(|a| a.value().copied()),
-                    };
-
-                    let selected = (0..I)
-                        .map(|j| {
-                            region
-                                .assign_advice(|| "copy inputs", config.hash[j], 0, || v[j])
-                                .expect("failed to assign copied inputs")
-                        })
-                        .collect::<Vec<_>>();
-
-                    Ok(Node(
-                        selected
-                            .try_into()
-                            .expect("Failed to compute selected value"),
-                    ))
+                    Ok(())
                 },
             )
             .unwrap();
-        return Ok(hash);
+        return Ok(());
     }
 }
 

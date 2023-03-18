@@ -147,7 +147,7 @@ fn function_merkle_32(#[case] n: usize) {
         .expect("get root value failed")
         .to_owned();
 
-    let circuit = MerklePathCircuit::<Fp, P128Pow5T3, 32, 3, 2>::new(left, right, init_index);
+    let circuit = MerklePathCircuit::<Fp, P128Pow5T3, 32, 3, 2>::new(left, right);
     let public = leaf_input
         .into_iter()
         .chain(index)
