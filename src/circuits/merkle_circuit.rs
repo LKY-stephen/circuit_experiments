@@ -29,6 +29,7 @@ pub struct MerklePathCircuit<
 > {
     left: Vec<[Value<F>; I]>,
     right: Vec<[Value<F>; I]>,
+    copy: Vec<Value<F>>,
     _marker: PhantomData<S>,
 }
 
@@ -243,8 +244,15 @@ impl<
 
         merkle_chip.load_leaves(&mut layouter, left_nodes[0].clone(), right_nodes[0].clone())?;
 
-        let root_node =
-            merkle_chip.load_path(&mut layouter, left_nodes, right_nodes, hash_nodes, M, n)?;
+        let root_node = merkle_chip.load_path(
+            &mut layouter,
+            left_nodes,
+            right_nodes,
+            hash_nodes,
+            &self.copy,
+            M,
+            n,
+        )?;
 
         merkle_chip.expose_public(&mut layouter, root_node, M + I)?;
         return Ok(());
@@ -264,29 +272,23 @@ impl<
     /// [left node, right node]
     /// ...
     /// [root, root]
-    pub fn new(left: Vec<Vec<F>>, right: Vec<Vec<F>>) -> MerklePathCircuit<F, S, M, W, I> {
+    pub fn new(
+        left: Vec<Vec<Value<F>>>,
+        right: Vec<Vec<Value<F>>>,
+        copy: Vec<Value<F>>,
+    ) -> MerklePathCircuit<F, S, M, W, I> {
         assert_eq!(left.len(), right.len());
+        assert_eq!(copy.len(), M + 1);
         MerklePathCircuit {
             left: left
                 .into_iter()
-                .map(|v| {
-                    v.into_iter()
-                        .map(Value::known)
-                        .collect::<Vec<_>>()
-                        .try_into()
-                        .expect("left inputs error")
-                })
+                .map(|v| v.try_into().expect("left inputs error"))
                 .collect(),
             right: right
                 .into_iter()
-                .map(|v| {
-                    v.into_iter()
-                        .map(Value::known)
-                        .collect::<Vec<_>>()
-                        .try_into()
-                        .expect("right inputs error")
-                })
+                .map(|v| v.try_into().expect("right inputs error"))
                 .collect(),
+            copy: copy,
             _marker: PhantomData,
         }
     }

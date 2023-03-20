@@ -1,12 +1,17 @@
 mod utils;
 use crate::utils::p128_pow5_t3::P128Pow5T3;
+use circuit_samples::circuits::merkle_circuit::MerklePathCircuit;
 use circuit_samples::circuits::poseidon_circuit::utils::Spec;
 use circuit_samples::circuits::*;
 use halo2_proofs::arithmetic::FieldExt;
+use halo2_proofs::circuit::Value;
 use halo2_proofs::dev::MockProver;
-use halo2_proofs::pasta::Fp;
+use halo2_proofs::pasta::{EqAffine, Fp};
+use halo2_proofs::plonk::{keygen_pk, keygen_vk};
+use halo2_proofs::poly::commitment::Params;
 use rand::prelude::*;
 use rstest::rstest;
+use utils::poseidon_hash::gen_merkle_path;
 
 #[cfg(test)]
 #[rstest]
@@ -71,10 +76,9 @@ fn function_poseidon(#[case] n: usize) {
 
 #[cfg(test)]
 #[rstest]
-#[case(16)]
-#[case(32)]
-fn function_merkle_32(#[case] n: usize) {
-    let m = 32_usize;
+#[case(16, 32)]
+#[case(32, 32)]
+fn function_merkle_32(#[case] n: usize, #[case] m: usize) {
     use circuit_samples::circuits::merkle_circuit::MerklePathCircuit;
 
     let row_n = (<P128Pow5T3 as Spec<Fp, 3>>::full_rounds()
@@ -82,79 +86,90 @@ fn function_merkle_32(#[case] n: usize) {
         * (<P128Pow5T3 as Spec<Fp, 3>>::element_size() + 2)
         + 6;
     let degree = ((row_n * m) as f64).log2().ceil() as u32;
-    let mut rng = rand::thread_rng();
-    let inputs: Vec<Fp> = (0..2 * n + 2)
-        .map(|_| <Fp as FieldExt>::from_u128(rng.gen::<u128>()))
-        .collect();
 
-    let mut left = vec![vec![inputs[0].to_owned(), inputs[1].to_owned()]];
-    let mut right = vec![vec![inputs[2].to_owned(), inputs[3].to_owned()]];
+    let path = utils::poseidon_hash::gen_merkle_path::<Fp, P128Pow5T3, 3>(n, m);
 
-    let mut index = vec![];
-    let init_index = rng.gen_bool(0.5);
-    let leaf_input = match init_index {
-        true => {
-            index.push(Fp::one());
-            vec![inputs[2].to_owned(), inputs[3].to_owned()]
-        }
-        false => {
-            index.push(Fp::zero());
-            vec![inputs[0].to_owned(), inputs[1].to_owned()]
-        }
-    };
-
-    // put element size
-    for i in 1..=m {
-        let bit = rng.gen_bool(0.5);
-        // add path
-        if i < m {
-            index.push(match bit {
-                true => Fp::one(),
-                false => Fp::zero(),
-            });
-        }
-
-        if i <= n {
-            let hash_inputs = left[i - 1]
-                .to_owned()
-                .into_iter()
-                .chain(right[i - 1].to_owned())
-                .collect::<Vec<_>>();
-            let hash =
-                utils::poseidon_hash::hash::<Fp, P128Pow5T3, 3>(hash_inputs.clone()).unwrap();
-            let element = match i < n {
-                true => vec![inputs[2 * i + 2].to_owned(), inputs[2 * i + 3].to_owned()],
-
-                // last line is duplicated
-                false => hash.clone(),
-            };
-
-            match bit {
-                true => {
-                    right.push(hash);
-                    left.push(element);
-                }
-                false => {
-                    left.push(hash);
-                    right.push(element);
-                }
-            };
-        }
-    }
-
-    let root = left
-        .get(n as usize)
-        .expect("get root value failed")
-        .to_owned();
-
-    let circuit = MerklePathCircuit::<Fp, P128Pow5T3, 32, 3, 2>::new(left, right);
-    let public = leaf_input
+    let circuit = MerklePathCircuit::<Fp, P128Pow5T3, 32, 3, 2>::new(
+        path.get_left_value(),
+        path.get_right_value(),
+        path.get_copy_value(m),
+    );
+    let public = path
+        .get_leaf()
         .into_iter()
-        .chain(index)
-        .chain(root)
+        .chain(path.get_index())
+        .chain(path.get_root())
         .collect::<Vec<_>>();
     let prover = MockProver::run(degree, &circuit, vec![public]).unwrap();
 
     prover.assert_satisfied();
     assert_eq!(prover.verify(), Ok(()));
+}
+
+#[cfg(test)]
+#[rstest]
+#[case(16, 32)]
+#[case(32, 32)]
+fn full_merkle_circuit(#[case] n: usize, #[case] m: usize) {
+    use halo2_proofs::{
+        plonk::{create_proof, verify_proof, SingleVerifier},
+        transcript::{Blake2bRead, Blake2bWrite, Challenge255},
+    };
+    use rand_core::OsRng;
+
+    let leaf_size = P128Pow5T3::element_size();
+
+    let row_n = (<P128Pow5T3 as Spec<Fp, 3>>::full_rounds()
+        + <P128Pow5T3 as Spec<Fp, 3>>::partial_rounds())
+        * (leaf_size + 2)
+        + 6;
+    let degree = ((row_n * m) as f64).log2().ceil() as u32;
+
+    let path = gen_merkle_path::<Fp, P128Pow5T3, 3>(n, m);
+
+    let prover_circuit = MerklePathCircuit::<Fp, P128Pow5T3, 32, 3, 2>::new(
+        path.get_left_value(),
+        path.get_right_value(),
+        path.get_copy_value(m),
+    );
+    let empty: Vec<Vec<Value<Fp>>> = vec![vec![Value::unknown(); leaf_size]; m];
+    let empty_copy: Vec<Value<Fp>> = vec![Value::unknown(); m + 1];
+    let empty_circuit = MerklePathCircuit::<Fp, P128Pow5T3, 32, 3, 2>::new(
+        empty.clone(),
+        empty.clone(),
+        empty_copy.clone(),
+    );
+    let public = path
+        .get_leaf()
+        .into_iter()
+        .chain(path.get_index())
+        .chain(path.get_root())
+        .collect::<Vec<_>>();
+
+    let params: Params<EqAffine> = Params::new(degree);
+    let vk = keygen_vk(&params, &empty_circuit).expect("failed to generate vk");
+    let pk = keygen_pk(&params, vk, &empty_circuit).expect("failed to generate pk");
+    let mut transcript = Blake2bWrite::<_, _, Challenge255<_>>::init(vec![]);
+
+    // Create a proof
+    create_proof(
+        &params,
+        &pk,
+        &[prover_circuit],
+        &[&[&public]],
+        OsRng,
+        &mut transcript,
+    )
+    .expect("proof generation should not fail");
+    let proof: Vec<u8> = transcript.finalize();
+    let mut transcript = Blake2bRead::<_, _, Challenge255<_>>::init(&proof[..]);
+    let strategy = SingleVerifier::new(&params);
+    assert!(verify_proof(
+        &params,
+        pk.get_vk(),
+        strategy,
+        &[&[&public]],
+        &mut transcript,
+    )
+    .is_ok());
 }
