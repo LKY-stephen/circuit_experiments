@@ -8,7 +8,7 @@ pub type Mds<F, const WIDTH: usize> = [[F; WIDTH]; WIDTH];
 /// The input should be a field F
 /// the sponge width is WIDTH
 /// Number of full round and partial rounds are fixed
-pub trait Spec<F: FieldExt, const WIDTH: usize>: fmt::Debug {
+pub trait Spec<F: FieldExt, const WIDTH: usize>: fmt::Debug + Clone + Default {
     /// The number of full rounds for this specification.
     ///
     /// This must be an even number.

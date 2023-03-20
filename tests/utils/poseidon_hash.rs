@@ -112,11 +112,7 @@ pub fn gen_merkle_path<F: FieldExt, S: Spec<F, W>, const W: usize>(
     let mut rng = rand::thread_rng();
     let element_size = S::element_size();
     let inputs: Vec<Vec<F>> = (0..n + 1)
-        .map(|_| {
-            (0..element_size)
-                .map(|_| <F as FieldExt>::from_u128(rng.gen::<u128>()))
-                .collect()
-        })
+        .map(|_| vec![F::random(&mut rng); element_size])
         .collect();
 
     let mut left = vec![inputs[0].to_owned()];
