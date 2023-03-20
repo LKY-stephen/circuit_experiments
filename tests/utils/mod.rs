@@ -1,3 +1,3 @@
 mod fp3;
-pub(crate) mod p128_pow5_t3;
-pub(crate) mod poseidon_hash;
+pub(super) mod p128_pow5_t3;
+pub(super) mod poseidon_hash;

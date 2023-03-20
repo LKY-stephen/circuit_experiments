@@ -30,6 +30,7 @@ pub trait MerklePathInstruction<F: FieldExt, const I: usize>: Chip<F> {
         left: Vec<[AssignedCell<F, F>; I]>,
         right: Vec<[AssignedCell<F, F>; I]>,
         hash: Vec<[AssignedCell<F, F>; I]>,
+        copy: &Vec<Value<F>>,
         m: usize,
         n: usize,
     ) -> Result<Self::Node, Error>;
@@ -240,12 +241,14 @@ impl<F: FieldExt, const I: usize> MerklePathInstruction<F, I> for MerklePathChip
         left: Vec<[AssignedCell<F, F>; I]>,
         right: Vec<[AssignedCell<F, F>; I]>,
         hash: Vec<[AssignedCell<F, F>; I]>,
+        copy: &Vec<Value<F>>,
         m: usize,
         n: usize,
     ) -> Result<Self::Node, Error> {
         let config = self.config();
         assert_eq!(m + 1, right.len());
         assert_eq!(m + 1, left.len());
+        assert_eq!(m + 1, copy.len());
         assert_eq!(m, hash.len());
         assert!(n <= m);
 
@@ -282,12 +285,7 @@ impl<F: FieldExt, const I: usize> MerklePathInstruction<F, I> for MerklePathChip
 
                     config.s_hash.enable(&mut region, i + 1)?;
 
-                    region.assign_advice(
-                        || "assign copy",
-                        config.copy_flag,
-                        i,
-                        || Value::known(F::zero()),
-                    )?;
+                    region.assign_advice(|| "assign copy", config.copy_flag, i, || copy[i])?;
                 }
 
                 // after the pathes are handled, we need to process root
@@ -296,15 +294,6 @@ impl<F: FieldExt, const I: usize> MerklePathInstruction<F, I> for MerklePathChip
                 // | root  | root    | root_hash  |  1   |  1   |
                 // | root  | root    | root_hash  |  1   |  0   |
                 // ....
-
-                // last copy for row n remaining are one
-                region.assign_advice(
-                    || "assign copy",
-                    config.copy_flag,
-                    n,
-                    || Value::known(F::zero()),
-                )?;
-
                 for i in n..m {
                     for j in 0..I {
                         left[i][j].copy_advice(|| "assign left", &mut region, config.left[j], i)?;
@@ -327,12 +316,7 @@ impl<F: FieldExt, const I: usize> MerklePathInstruction<F, I> for MerklePathChip
 
                     config.s_hash.enable(&mut region, i)?;
 
-                    region.assign_advice(
-                        || "assign copy",
-                        config.copy_flag,
-                        i + 1,
-                        || Value::known(F::one()),
-                    )?;
+                    region.assign_advice(|| "assign copy", config.copy_flag, i, || copy[i])?;
                 }
 
                 // finally we put two roots at row m+1
@@ -349,7 +333,7 @@ impl<F: FieldExt, const I: usize> MerklePathInstruction<F, I> for MerklePathChip
                         left[m][j]
                             .copy_advice(|| "assign right", &mut region, config.right[j], m)
                             .expect("failed to get right root value");
-                        // root is useless, but we assign a random value for query
+                        // hash field is useless, but we assign a random value for query
                         region
                             .assign_advice(
                                 || "assign dump hash",
@@ -363,6 +347,7 @@ impl<F: FieldExt, const I: usize> MerklePathInstruction<F, I> for MerklePathChip
                     .collect::<Vec<_>>()
                     .try_into()
                     .expect("Failed to compute root");
+                region.assign_advice(|| "assign copy", config.copy_flag, m, || copy[m])?;
 
                 // index is not needed now, but we kept them for the
                 // bool constraint

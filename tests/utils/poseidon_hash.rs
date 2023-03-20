@@ -1,5 +1,12 @@
 use circuit_samples::circuits::poseidon_circuit::utils::Spec;
-use halo2_proofs::{arithmetic::FieldExt, poly::Error};
+use halo2_proofs::{arithmetic::FieldExt, circuit::Value, poly::Error};
+use rand::Rng;
+
+pub struct MerklePath<F: FieldExt> {
+    left: Vec<Vec<F>>,
+    right: Vec<Vec<F>>,
+    index: Vec<F>,
+}
 
 /// A mirrored implementation for poseidon hash
 pub fn hash<F: FieldExt, S: Spec<F, W>, const W: usize>(inputs: Vec<F>) -> Result<Vec<F>, Error> {
@@ -94,4 +101,125 @@ fn partial_round<F: FieldExt, S: Spec<F, W>, const W: usize>(
         .unwrap();
 
     return result;
+}
+
+// Generate a random merkle path with n layers and m index
+// return left path, right path, index and selected leaf
+pub fn gen_merkle_path<F: FieldExt, S: Spec<F, W>, const W: usize>(
+    n: usize,
+    m: usize,
+) -> MerklePath<F> {
+    let mut rng = rand::thread_rng();
+    let element_size = S::element_size();
+    let inputs: Vec<Vec<F>> = (0..n + 1)
+        .map(|_| {
+            (0..element_size)
+                .map(|_| <F as FieldExt>::from_u128(rng.gen::<u128>()))
+                .collect()
+        })
+        .collect();
+
+    let mut left = vec![inputs[0].to_owned()];
+    let mut right = vec![inputs[1].to_owned()];
+
+    let mut index = vec![];
+
+    match rng.gen_bool(0.5) {
+        true => {
+            index.push(F::one());
+        }
+        false => {
+            index.push(F::zero());
+        }
+    };
+
+    // put element size
+    for i in 1..=m {
+        let bit = rng.gen_bool(0.5);
+        // add path
+        if i < m {
+            index.push(match bit {
+                true => F::one(),
+                false => F::zero(),
+            });
+        }
+
+        if i <= n {
+            let hash_inputs = left[i - 1]
+                .to_owned()
+                .into_iter()
+                .chain(right[i - 1].to_owned())
+                .collect::<Vec<_>>();
+            let hash = hash::<F, S, W>(hash_inputs.clone()).unwrap();
+            let element = match i < n {
+                true => inputs[i + 1].to_owned(),
+
+                // last line is duplicated
+                false => hash.clone(),
+            };
+
+            match bit {
+                true => {
+                    right.push(hash);
+                    left.push(element);
+                }
+                false => {
+                    left.push(hash);
+                    right.push(element);
+                }
+            };
+        }
+    }
+
+    assert!(left.iter().all(|v| v.len() == element_size));
+    assert!(right.iter().all(|v| v.len() == element_size));
+
+    return MerklePath { left, right, index };
+}
+
+impl<F: FieldExt> MerklePath<F> {
+    pub fn get_leaf(&self) -> Vec<F> {
+        let inital_bit = self.index.first().expect("leaf index is missed").to_owned();
+        if inital_bit == F::one() {
+            self.right.first().expect("missing right leaf ").to_owned()
+        } else if inital_bit == F::zero() {
+            self.left.first().expect("missing left leaf ").to_owned()
+        } else {
+            panic!("leaf index is not binary");
+        }
+    }
+
+    pub fn get_root(&self) -> Vec<F> {
+        self.right.last().expect("missing right leaf ").to_owned()
+    }
+
+    pub fn get_index(&self) -> Vec<F> {
+        self.index.clone()
+    }
+
+    pub fn get_left_value(&self) -> Vec<Vec<Value<F>>> {
+        self.left
+            .clone()
+            .into_iter()
+            .map(|v| v.into_iter().map(Value::known).collect())
+            .collect::<Vec<_>>()
+    }
+
+    pub fn get_right_value(&self) -> Vec<Vec<Value<F>>> {
+        self.right
+            .clone()
+            .into_iter()
+            .map(|v| v.into_iter().map(Value::known).collect())
+            .collect::<Vec<_>>()
+    }
+
+    pub fn get_copy_value(&self, m: usize) -> Vec<Value<F>> {
+        let n = self.left.len();
+        (0..=m)
+            .map(|i| match i < n {
+                true => Value::known(F::zero()),
+                false => Value::known(F::one()),
+            })
+            .collect::<Vec<_>>()
+    }
 }
