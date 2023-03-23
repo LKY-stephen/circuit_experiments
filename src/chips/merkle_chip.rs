@@ -4,8 +4,8 @@
 
 use std::{marker::PhantomData, vec};
 
+use ff::PrimeField;
 use halo2_proofs::{
-    arithmetic::FieldExt,
     circuit::{AssignedCell, Chip, Layouter, Region, Value},
     plonk::{
         Advice, Column, ConstraintSystem, Constraints, Error,
@@ -16,9 +16,9 @@ use halo2_proofs::{
 };
 
 #[derive(Debug, Clone)]
-pub struct Node<F: FieldExt, const I: usize>([AssignedCell<F, F>; I]);
+pub struct Node<F: PrimeField, const I: usize>([AssignedCell<F, F>; I]);
 
-pub trait MerklePathInstruction<F: FieldExt, const I: usize>: Chip<F> {
+pub trait MerklePathInstruction<F: PrimeField, const I: usize>: Chip<F> {
     /// Variable representing a tree node
     type Node;
 
@@ -54,7 +54,7 @@ pub trait MerklePathInstruction<F: FieldExt, const I: usize>: Chip<F> {
     ) -> Result<(), Error>;
 }
 
-pub struct MerklePathChip<F: FieldExt, const I: usize> {
+pub struct MerklePathChip<F: PrimeField, const I: usize> {
     config: MerklePathConfig<I>,
     _marker: PhantomData<F>,
 }
@@ -63,14 +63,8 @@ pub struct MerklePathChip<F: FieldExt, const I: usize> {
 /// The chip handles three
 #[derive(Clone, Debug)]
 pub struct MerklePathConfig<const I: usize> {
-    /// private input for left child
-    left: [Column<Advice>; I],
-
-    /// private input for right child
-    right: [Column<Advice>; I],
-
-    /// hash for inputs
-    hash: [Column<Advice>; I],
+    /// private input for element
+    value: [Column<Advice>; I],
 
     /// flag for hash and copy
     copy_flag: Column<Advice>,
@@ -88,7 +82,7 @@ pub struct MerklePathConfig<const I: usize> {
     s_pub: Selector,
 }
 
-impl<F: FieldExt, const I: usize> MerklePathChip<F, I> {
+impl<F: PrimeField, const I: usize> MerklePathChip<F, I> {
     pub fn new(config: MerklePathConfig<I>) -> Self {
         MerklePathChip {
             config,
@@ -98,18 +92,14 @@ impl<F: FieldExt, const I: usize> MerklePathChip<F, I> {
 
     pub fn configure(
         meta: &mut ConstraintSystem<F>,
-        left: [Column<Advice>; I],
-        right: [Column<Advice>; I],
-        hash: [Column<Advice>; I],
+        value: [Column<Advice>; I],
         copy_flag: Column<Advice>,
         index_flag: Column<Advice>,
         public: Column<Instance>,
     ) -> <Self as Chip<F>>::Config {
         // equality checks for output and internal states
         for i in 0..I {
-            meta.enable_equality(left[i]);
-            meta.enable_equality(right[i]);
-            meta.enable_equality(hash[i]);
+            meta.enable_equality(value[i]);
         }
 
         meta.enable_equality(index_flag);
@@ -117,7 +107,7 @@ impl<F: FieldExt, const I: usize> MerklePathChip<F, I> {
         let s_hash = meta.selector();
         let s_pub = meta.selector();
 
-        let one = Expression::Constant(F::one());
+        let one = Expression::Constant(F::ONE);
         let bool_constraint = |v: Expression<F>| v.clone() * (one.clone() - v);
 
         let copy_flag_constraint =
@@ -127,28 +117,36 @@ impl<F: FieldExt, const I: usize> MerklePathChip<F, I> {
         meta.create_gate("Copy_Hash", |meta| {
             let s_hash = meta.query_selector(s_hash);
 
+            // we store values as
+            // value         copy      index      s_hash
+            // left           -          -          0
+            // right          -          -          0
+            // hash          0/1        0/1         1
+            // next left      -          -          0
+            // next right     -          -          0
+
             let p_left_v = (0..I)
-                .map(|i| meta.query_advice(left[i], Rotation::prev()))
+                .map(|i| meta.query_advice(value[i], Rotation(-2)))
                 .collect::<Vec<_>>();
 
             let p_right_v = (0..I)
-                .map(|i| meta.query_advice(right[i], Rotation::prev()))
+                .map(|i| meta.query_advice(value[i], Rotation::prev()))
                 .collect::<Vec<_>>();
 
             let p_hash_v = (0..I)
-                .map(|i| meta.query_advice(hash[i], Rotation::prev()))
+                .map(|i| meta.query_advice(value[i], Rotation::cur()))
                 .collect::<Vec<_>>();
 
-            let p_copy = meta.query_advice(copy_flag, Rotation::prev());
+            let n_copy = meta.query_advice(copy_flag, Rotation(3));
             let copy = meta.query_advice(copy_flag, Rotation::cur());
             let index = meta.query_advice(index_flag, Rotation::cur());
 
             let left_v = (0..I)
-                .map(|i| meta.query_advice(left[i], Rotation::cur()))
+                .map(|i| meta.query_advice(value[i], Rotation::next()))
                 .collect::<Vec<_>>();
 
             let right_v = (0..I)
-                .map(|i| meta.query_advice(right[i], Rotation::cur()))
+                .map(|i| meta.query_advice(value[i], Rotation(2)))
                 .collect::<Vec<_>>();
 
             // copy is zero until some point it becomes one (p_copy*(1-copy)).
@@ -174,9 +172,9 @@ impl<F: FieldExt, const I: usize> MerklePathChip<F, I> {
                 .collect::<Vec<_>>();
 
             let constraints = vec![
-                bool_constraint(p_copy.clone()),
+                bool_constraint(n_copy.clone()),
                 bool_constraint(copy.clone()),
-                copy_flag_constraint(p_copy.clone(), copy.clone()),
+                copy_flag_constraint(copy.clone(), n_copy.clone()),
                 bool_constraint(index),
             ]
             .into_iter()
@@ -189,16 +187,22 @@ impl<F: FieldExt, const I: usize> MerklePathChip<F, I> {
         meta.create_gate("PUB_SELECT", |meta| {
             let s_pub = meta.query_selector(s_pub);
 
+            // we store values as
+            // value         copy      index      s_pub
+            // left           -          -          0
+            // right          -          -          0
+            // hash          0/1        0/1         1
+
             let left_v = (0..I)
-                .map(|i| meta.query_advice(left[i], Rotation::cur()))
+                .map(|i| meta.query_advice(value[i], Rotation(-2)))
                 .collect::<Vec<_>>();
 
             let right_v = (0..I)
-                .map(|i| meta.query_advice(right[i], Rotation::cur()))
+                .map(|i| meta.query_advice(value[i], Rotation::prev()))
                 .collect::<Vec<_>>();
 
             let hash_v = (0..I)
-                .map(|i| meta.query_advice(hash[i], Rotation::cur()))
+                .map(|i| meta.query_advice(value[i], Rotation::cur()))
                 .collect::<Vec<_>>();
 
             let index = meta.query_advice(index_flag, Rotation::cur());
@@ -220,9 +224,7 @@ impl<F: FieldExt, const I: usize> MerklePathChip<F, I> {
         });
 
         MerklePathConfig {
-            left,
-            right,
-            hash,
+            value,
             public,
             copy_flag,
             index_flag,
@@ -232,7 +234,7 @@ impl<F: FieldExt, const I: usize> MerklePathChip<F, I> {
     }
 }
 
-impl<F: FieldExt, const I: usize> MerklePathInstruction<F, I> for MerklePathChip<F, I> {
+impl<F: PrimeField, const I: usize> MerklePathInstruction<F, I> for MerklePathChip<F, I> {
     type Node = Node<F, I>;
 
     fn load_path(
@@ -255,108 +257,149 @@ impl<F: FieldExt, const I: usize> MerklePathInstruction<F, I> for MerklePathChip
         layouter.assign_region(
             || "load path",
             |mut region: Region<'_, F>| {
-                // from row 1 till n-1, we do hash for each round, inputs our hash
+                // from first n row we do the following
                 //
-                // | left  | right   |  hash  | copy | index|
-                // | left1 | right1  | hash1  |  0   |  1   |
-                // | left2 | right2  | hash2  |  0   |  0   |
+                // |  value  | copy | index| s_hash|
+                // |  left1  |  *   |  *   |    0  |
+                // |  right1 |  *   |  *   |    0  |
+                // |  hash1  |  0   |  0   |    1  |
                 // ....
                 // hash(i) =  left(i+1) if index =0 else right(i+1)
 
                 for i in 0..n {
+                    let cur_pos = i * 3;
+                    let hash_pos = cur_pos + 2;
                     for j in 0..I {
-                        left[i][j].copy_advice(|| "assign left", &mut region, config.left[j], i)?;
+                        left[i][j].copy_advice(
+                            || "assign left",
+                            &mut region,
+                            config.value[j],
+                            cur_pos,
+                        )?;
                         right[i][j].copy_advice(
                             || "assign right",
                             &mut region,
-                            config.right[j],
-                            i,
+                            config.value[j],
+                            cur_pos + 1,
                         )?;
-                        hash[i][j].copy_advice(|| "copy hash", &mut region, config.hash[j], i)?;
+                        hash[i][j].copy_advice(
+                            || "copy hash",
+                            &mut region,
+                            config.value[j],
+                            hash_pos,
+                        )?;
                     }
 
-                    region.assign_advice_from_instance(
-                        || "assign index",
-                        config.public,
-                        I + i,
-                        config.index_flag,
-                        i,
+                    config.s_hash.enable(&mut region, hash_pos)?;
+
+                    region.assign_advice(
+                        || "assign copy",
+                        config.copy_flag,
+                        hash_pos,
+                        || copy[i],
                     )?;
-
-                    config.s_hash.enable(&mut region, i + 1)?;
-
-                    region.assign_advice(|| "assign copy", config.copy_flag, i, || copy[i])?;
                 }
 
                 // after the pathes are handled, we need to process root
                 //
-                // | left  | right   |    hash    | copy | index|
-                // | root  | root    | root_hash  |  1   |  1   |
-                // | root  | root    | root_hash  |  1   |  0   |
+                // |  value  | copy | index| s_hash|
+                // |  root   |  *   |  *   |    0  |
+                // |  root   |  *   |  *   |    0  |
+                // |  hash   |  1   |  0   |    1  |
                 // ....
                 for i in n..m {
+                    let cur_pos = i * 3;
+                    let hash_pos = cur_pos + 2;
                     for j in 0..I {
-                        left[i][j].copy_advice(|| "assign left", &mut region, config.left[j], i)?;
+                        left[i][j].copy_advice(
+                            || "assign left",
+                            &mut region,
+                            config.value[j],
+                            cur_pos,
+                        )?;
                         right[i][j].copy_advice(
                             || "assign right",
                             &mut region,
-                            config.right[j],
-                            i,
+                            config.value[j],
+                            cur_pos + 1,
                         )?;
-                        hash[i][j].copy_advice(|| "copy hash", &mut region, config.hash[j], i)?;
+                        hash[i][j].copy_advice(
+                            || "copy hash",
+                            &mut region,
+                            config.value[j],
+                            hash_pos,
+                        )?;
                     }
 
+                    config.s_hash.enable(&mut region, hash_pos)?;
+
+                    region.assign_advice(
+                        || "assign copy",
+                        config.copy_flag,
+                        hash_pos,
+                        || copy[i],
+                    )?;
+                }
+
+                // we assign index independently since it has different position
+                for i in 1..m {
+                    // we skip the first index since it is for leaf
                     region.assign_advice_from_instance(
                         || "assign index",
                         config.public,
                         I + i,
                         config.index_flag,
-                        i,
+                        i * 3 - 1,
                     )?;
-
-                    config.s_hash.enable(&mut region, i)?;
-
-                    region.assign_advice(|| "assign copy", config.copy_flag, i, || copy[i])?;
                 }
-
-                // finally we put two roots at row m+1
+                // finally we put two roots at the last two row
                 //
-                // | left  | right   |    hash    | copy | index|
-                // | root  | root    | root_hash  |  1   |   -  |
+                // |  value  | copy | index| s_hash|
+                // |  hash   |  0   |  0/1 |    1  |
+                // |  root   |  *   |   *  |    0  |
+                // |  root   |  *   |   *  |    0  |
                 // ....
+
+                let cur_pos = m * 3;
                 let root = (0..I)
                     .map(|j| {
                         let left_v = left[m][j]
-                            .copy_advice(|| "assign left", &mut region, config.left[j], m)
+                            .copy_advice(
+                                || "assign left root",
+                                &mut region,
+                                config.value[j],
+                                cur_pos,
+                            )
                             .expect("failed to get left root value");
                         // right is just a copy
                         left[m][j]
-                            .copy_advice(|| "assign right", &mut region, config.right[j], m)
-                            .expect("failed to get right root value");
-                        // hash field is useless, but we assign a random value for query
-                        region
-                            .assign_advice(
-                                || "assign dump hash",
-                                config.hash[j],
-                                m,
-                                || Value::known(F::one()),
+                            .copy_advice(
+                                || "assign right root",
+                                &mut region,
+                                config.value[j],
+                                cur_pos + 1,
                             )
-                            .expect("failed to assign hash");
+                            .expect("failed to get right root value");
+
                         return left_v;
                     })
                     .collect::<Vec<_>>()
                     .try_into()
                     .expect("Failed to compute root");
-                region.assign_advice(|| "assign copy", config.copy_flag, m, || copy[m])?;
 
-                // index is not needed now, but we kept them for the
-                // bool constraint
+                // one last index is meaningless but will be queried
+                region.assign_advice(
+                    || "assign last index to one",
+                    config.index_flag,
+                    cur_pos - 1,
+                    || Value::known(F::ZERO),
+                )?;
 
                 region.assign_advice(
-                    || "assign index",
-                    config.index_flag,
-                    m,
-                    || Value::known(F::one()),
+                    || "assign last index to one",
+                    config.copy_flag,
+                    cur_pos + 2,
+                    || Value::known(F::ONE),
                 )?;
                 return Ok(Node(root));
             },
@@ -390,22 +433,23 @@ impl<F: FieldExt, const I: usize> MerklePathInstruction<F, I> for MerklePathChip
                 || "load inputs",
                 |mut region: Region<'_, F>| {
                     // pub copy layer
-                    // | left | right |  hash  | copy | index| instance|
-                    // | left | right | chosen |  0   |  *   |  pub1 |
-                    // | left | right | hash   |  0   |  *   |  pub2 |
+                    // |  value  | copy | index|  s_pub|
+                    // |  left   |  *   |   *  |    0  |
+                    // |  right  |  *   |   *  |    0  |
+                    // |  chosen |  0   |  0/1 |    1  |
                     // ....
                     // chosen = pub1,pub2, ... pubI
 
-                    config.s_pub.enable(&mut region, 0)?;
+                    config.s_pub.enable(&mut region, 2)?;
                     for j in 0..I {
-                        left[j].copy_advice(|| "assign left", &mut region, config.left[j], 0)?;
-                        right[j].copy_advice(|| "assign right", &mut region, config.right[j], 0)?;
+                        left[j].copy_advice(|| "assign left", &mut region, config.value[j], 0)?;
+                        right[j].copy_advice(|| "assign right", &mut region, config.value[j], 1)?;
                         region.assign_advice_from_instance(
                             || "copy selected leaf from instance",
                             config.public,
                             j,
-                            config.hash[j],
-                            0,
+                            config.value[j],
+                            2,
                         )?;
                     }
 
@@ -414,13 +458,14 @@ impl<F: FieldExt, const I: usize> MerklePathInstruction<F, I> for MerklePathChip
                         config.public,
                         I,
                         config.index_flag,
-                        0,
+                        2,
                     )?;
+
                     region.assign_advice(
                         || "assign copy",
                         config.copy_flag,
-                        0,
-                        || Value::known(F::zero()),
+                        2,
+                        || Value::known(F::ZERO),
                     )?;
 
                     Ok(())
@@ -431,7 +476,7 @@ impl<F: FieldExt, const I: usize> MerklePathInstruction<F, I> for MerklePathChip
     }
 }
 
-impl<F: FieldExt, const I: usize> Chip<F> for MerklePathChip<F, I> {
+impl<F: PrimeField, const I: usize> Chip<F> for MerklePathChip<F, I> {
     type Config = MerklePathConfig<I>;
 
     type Loaded = ();

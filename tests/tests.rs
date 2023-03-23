@@ -3,13 +3,12 @@ use crate::utils::p128_pow5_t3::P128Pow5T3;
 use circuit_samples::circuits::merkle_circuit::MerklePathCircuit;
 use circuit_samples::circuits::poseidon_circuit::utils::Spec;
 use circuit_samples::circuits::*;
-use halo2_proofs::arithmetic::FieldExt;
+use ff::PrimeField;
 use halo2_proofs::circuit::Value;
 use halo2_proofs::dev::MockProver;
 use halo2_proofs::pasta::{EqAffine, Fp};
 use halo2_proofs::plonk::{keygen_pk, keygen_vk};
 use halo2_proofs::poly::commitment::Params;
-use rand::prelude::*;
 use rstest::rstest;
 use utils::poseidon_hash::gen_merkle_path;
 
@@ -50,15 +49,15 @@ fn function_poseidon(#[case] n: usize) {
     // each permutation we have rounds only
     // add inputs has 3 lines
 
+    use ff::Field;
+
     let row_n = (<P128Pow5T3 as Spec<Fp, 3>>::full_rounds()
         + <P128Pow5T3 as Spec<Fp, 3>>::partial_rounds())
         * (<P128Pow5T3 as Spec<Fp, 3>>::element_size() + n)
         + 3 * n;
     let degree = (row_n as f32).log2().ceil() as u32;
     let mut rng = rand::thread_rng();
-    let inputs: Vec<Fp> = (0..n)
-        .map(|_| <Fp as FieldExt>::from_u128(rng.gen::<u128>()))
-        .collect();
+    let inputs: Vec<Fp> = (0..n).map(|_| <Fp as Field>::random(&mut rng)).collect();
     let mut outputs = utils::poseidon_hash::hash::<Fp, P128Pow5T3, 3>(inputs.clone()).unwrap();
 
     let circuit = poseidon_circuit::PoseidonCircuit::<Fp, P128Pow5T3, 3>::new(inputs);

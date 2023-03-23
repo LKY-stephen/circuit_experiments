@@ -1,17 +1,18 @@
 use circuit_samples::circuits::poseidon_circuit::utils::Spec;
-use halo2_proofs::{arithmetic::FieldExt, circuit::Value, poly::Error};
+use ff::PrimeField;
+use halo2_proofs::{circuit::Value, poly::Error};
 use rand::Rng;
 
-pub struct MerklePath<F: FieldExt> {
+pub struct MerklePath<F: PrimeField> {
     left: Vec<Vec<F>>,
     right: Vec<Vec<F>>,
     index: Vec<F>,
 }
 
 /// A mirrored implementation for poseidon hash
-pub fn hash<F: FieldExt, S: Spec<F, W>, const W: usize>(inputs: Vec<F>) -> Result<Vec<F>, Error> {
+pub fn hash<F: PrimeField, S: Spec<F, W>, const W: usize>(inputs: Vec<F>) -> Result<Vec<F>, Error> {
     // initate states [0,0,...., capacity]
-    let mut states = [F::zero(); W];
+    let mut states = [F::ZERO; W];
     states[W - 1] = F::from_u128(S::capacity());
     let size = S::element_size();
 
@@ -33,7 +34,7 @@ pub fn hash<F: FieldExt, S: Spec<F, W>, const W: usize>(inputs: Vec<F>) -> Resul
     return Ok(results);
 }
 
-fn permutation<F: FieldExt, S: Spec<F, W>, const W: usize>(input: [F; W]) -> [F; W] {
+fn permutation<F: PrimeField, S: Spec<F, W>, const W: usize>(input: [F; W]) -> [F; W] {
     let fr = S::full_rounds();
     let pr = S::partial_rounds();
     let all_rounds = fr + pr;
@@ -54,7 +55,7 @@ fn permutation<F: FieldExt, S: Spec<F, W>, const W: usize>(input: [F; W]) -> [F;
     result
 }
 
-fn full_round<F: FieldExt, S: Spec<F, W>, const W: usize>(input: [F; W], round: usize) -> [F; W] {
+fn full_round<F: PrimeField, S: Spec<F, W>, const W: usize>(input: [F; W], round: usize) -> [F; W] {
     let ark = S::arks()[round];
     let mds = S::mds();
     // add round constant and apply full box
@@ -79,7 +80,7 @@ fn full_round<F: FieldExt, S: Spec<F, W>, const W: usize>(input: [F; W], round: 
     return result;
 }
 
-fn partial_round<F: FieldExt, S: Spec<F, W>, const W: usize>(
+fn partial_round<F: PrimeField, S: Spec<F, W>, const W: usize>(
     input: [F; W],
     round: usize,
 ) -> [F; W] {
@@ -105,7 +106,7 @@ fn partial_round<F: FieldExt, S: Spec<F, W>, const W: usize>(
 
 // Generate a random merkle path with n layers and m index
 // return left path, right path, index and selected leaf
-pub fn gen_merkle_path<F: FieldExt, S: Spec<F, W>, const W: usize>(
+pub fn gen_merkle_path<F: PrimeField, S: Spec<F, W>, const W: usize>(
     n: usize,
     m: usize,
 ) -> MerklePath<F> {
@@ -122,10 +123,10 @@ pub fn gen_merkle_path<F: FieldExt, S: Spec<F, W>, const W: usize>(
 
     match rng.gen_bool(0.5) {
         true => {
-            index.push(F::one());
+            index.push(F::ONE);
         }
         false => {
-            index.push(F::zero());
+            index.push(F::ZERO);
         }
     };
 
@@ -135,8 +136,8 @@ pub fn gen_merkle_path<F: FieldExt, S: Spec<F, W>, const W: usize>(
         // add path
         if i < m {
             index.push(match bit {
-                true => F::one(),
-                false => F::zero(),
+                true => F::ONE,
+                false => F::ZERO,
             });
         }
 
@@ -173,12 +174,12 @@ pub fn gen_merkle_path<F: FieldExt, S: Spec<F, W>, const W: usize>(
     return MerklePath { left, right, index };
 }
 
-impl<F: FieldExt> MerklePath<F> {
+impl<F: PrimeField> MerklePath<F> {
     pub fn get_leaf(&self) -> Vec<F> {
         let inital_bit = self.index.first().expect("leaf index is missed").to_owned();
-        if inital_bit == F::one() {
+        if inital_bit == F::ONE {
             self.right.first().expect("missing right leaf ").to_owned()
-        } else if inital_bit == F::zero() {
+        } else if inital_bit == F::ZERO {
             self.left.first().expect("missing left leaf ").to_owned()
         } else {
             panic!("leaf index is not binary");
@@ -210,11 +211,11 @@ impl<F: FieldExt> MerklePath<F> {
     }
 
     pub fn get_copy_value(&self, m: usize) -> Vec<Value<F>> {
-        let n = self.left.len();
+        let n = self.left.len() - 1;
         (0..=m)
             .map(|i| match i < n {
-                true => Value::known(F::zero()),
-                false => Value::known(F::one()),
+                true => Value::known(F::ZERO),
+                false => Value::known(F::ONE),
             })
             .collect::<Vec<_>>()
     }
