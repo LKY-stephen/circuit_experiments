@@ -4,13 +4,19 @@ use crate::chips::merkle_chip::{MerklePathChip, MerklePathConfig, MerklePathInst
 
 use super::super::chips::poseidon_chip::*;
 use super::poseidon_circuit::utils::Spec;
-use halo2_proofs::arithmetic::FieldExt;
+
+use ff::PrimeField;
 use halo2_proofs::circuit::{AssignedCell, Layouter, SimpleFloorPlanner, Value};
 use halo2_proofs::plonk::{Circuit, ConstraintSystem, Error};
 
 #[derive(Clone)]
-pub struct MerkleConfig<F: FieldExt, S: Spec<F, W>, const M: usize, const W: usize, const I: usize>
-{
+pub struct MerkleConfig<
+    F: PrimeField,
+    S: Spec<F, W>,
+    const M: usize,
+    const W: usize,
+    const I: usize,
+> {
     merkle_config: MerklePathConfig<I>,
     poseidon_config: PoseidonArthConfig<F, W>,
     _marker: PhantomData<S>,
@@ -21,7 +27,7 @@ pub struct MerkleConfig<F: FieldExt, S: Spec<F, W>, const M: usize, const W: usi
 // inputs permutation rounds will go for all abosrb
 #[derive(Clone, Default)]
 pub struct MerklePathCircuit<
-    F: FieldExt,
+    F: PrimeField,
     S: Spec<F, W>,
     const M: usize,
     const W: usize,
@@ -34,7 +40,7 @@ pub struct MerklePathCircuit<
 }
 
 impl<
-        F: FieldExt,
+        F: PrimeField,
         S: Spec<F, W> + Clone + Default,
         const M: usize,
         const W: usize,
@@ -50,17 +56,7 @@ impl<
     }
 
     fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
-        let left = (0..I)
-            .map(|_| meta.advice_column())
-            .collect::<Vec<_>>()
-            .try_into()
-            .unwrap();
-        let right = (0..I)
-            .map(|_| meta.advice_column())
-            .collect::<Vec<_>>()
-            .try_into()
-            .unwrap();
-        let hash = (0..I)
+        let value = (0..I)
             .map(|_| meta.advice_column())
             .collect::<Vec<_>>()
             .try_into()
@@ -81,9 +77,7 @@ impl<
         MerkleConfig {
             merkle_config: MerklePathChip::configure(
                 meta,
-                left,
-                right,
-                hash,
+                value,
                 copy_flag,
                 index_flag,
                 output.clone(),
@@ -260,7 +254,7 @@ impl<
 }
 
 impl<
-        F: FieldExt,
+        F: PrimeField,
         S: Spec<F, W> + Clone + Default,
         const M: usize,
         const W: usize,

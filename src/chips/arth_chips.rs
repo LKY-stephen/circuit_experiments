@@ -1,18 +1,18 @@
 use std::marker::PhantomData;
 
+use ff::PrimeField;
 use halo2_proofs::{
-    arithmetic::FieldExt,
     circuit::{AssignedCell, Chip, Layouter, Region, Value},
     plonk::{Advice, Column, ConstraintSystem, Error, Instance, Selector},
     poly::Rotation,
 };
 
 #[derive(Clone)]
-pub struct Number<F: FieldExt> {
+pub struct Number<F: PrimeField> {
     value: AssignedCell<F, F>,
 }
 
-pub trait NumericInstructions<F: FieldExt>: Chip<F> {
+pub trait NumericInstructions<F: PrimeField>: Chip<F> {
     /// Variable representing a number.
     type Num;
 
@@ -49,7 +49,7 @@ pub trait NumericInstructions<F: FieldExt>: Chip<F> {
     ) -> Result<(), Error>;
 }
 
-pub struct ArthChip<F: FieldExt> {
+pub struct ArthChip<F: PrimeField> {
     config: ArthConfig,
     _marker: PhantomData<F>,
 }
@@ -68,7 +68,7 @@ pub struct ArthConfig {
     s_cube: Selector,
 }
 
-impl<F: FieldExt> ArthChip<F> {
+impl<F: PrimeField> ArthChip<F> {
     pub fn new(config: ArthConfig) -> Self {
         ArthChip {
             config,
@@ -152,7 +152,7 @@ impl<F: FieldExt> ArthChip<F> {
     }
 }
 
-impl<F: FieldExt> NumericInstructions<F> for ArthChip<F> {
+impl<F: PrimeField> NumericInstructions<F> for ArthChip<F> {
     type Num = Number<F>;
 
     fn load_private(
@@ -299,7 +299,7 @@ impl<F: FieldExt> NumericInstructions<F> for ArthChip<F> {
     }
 }
 
-impl<F: FieldExt> Chip<F> for ArthChip<F> {
+impl<F: PrimeField> Chip<F> for ArthChip<F> {
     type Config = ArthConfig;
 
     type Loaded = ();

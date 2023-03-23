@@ -3,14 +3,14 @@ use std::marker::PhantomData;
 use self::utils::Spec;
 
 use super::super::chips::poseidon_chip::*;
-use halo2_proofs::arithmetic::FieldExt;
+use ff::PrimeField;
 use halo2_proofs::circuit::{Layouter, SimpleFloorPlanner, Value};
 use halo2_proofs::plonk::{Circuit, ConstraintSystem, Error};
 
 pub mod utils;
 
 #[derive(Clone)]
-pub struct PoseidonConfig<F: FieldExt, S: Spec<F, W>, const W: usize> {
+pub struct PoseidonConfig<F: PrimeField, S: Spec<F, W>, const W: usize> {
     arth_config: PoseidonArthConfig<F, W>,
     _marker: PhantomData<S>,
 }
@@ -19,12 +19,12 @@ pub struct PoseidonConfig<F: FieldExt, S: Spec<F, W>, const W: usize> {
 // For each input, we fixed the padding as [x,1,0,0,...,0]
 // inputs permutation rounds will go for all abosrb
 #[derive(Clone, Default)]
-pub struct PoseidonCircuit<F: FieldExt, S: Spec<F, W>, const W: usize> {
+pub struct PoseidonCircuit<F: PrimeField, S: Spec<F, W>, const W: usize> {
     x: Vec<Value<F>>,
     _marker: PhantomData<S>,
 }
 
-impl<F: FieldExt, S: Spec<F, W> + Clone + Default, const W: usize> Circuit<F>
+impl<F: PrimeField, S: Spec<F, W> + Clone + Default, const W: usize> Circuit<F>
     for PoseidonCircuit<F, S, W>
 {
     type Config = PoseidonConfig<F, S, W>;
@@ -100,7 +100,7 @@ impl<F: FieldExt, S: Spec<F, W> + Clone + Default, const W: usize> Circuit<F>
     }
 }
 
-impl<F: FieldExt, S: Spec<F, W>, const W: usize> PoseidonCircuit<F, S, W> {
+impl<F: PrimeField, S: Spec<F, W>, const W: usize> PoseidonCircuit<F, S, W> {
     pub fn new(input: Vec<F>) -> PoseidonCircuit<F, S, W> {
         PoseidonCircuit {
             x: input

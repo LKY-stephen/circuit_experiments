@@ -1,7 +1,7 @@
 use std::{marker::PhantomData, vec};
 
+use ff::PrimeField;
 use halo2_proofs::{
-    arithmetic::FieldExt,
     circuit::{AssignedCell, Chip, Layouter, Region, Value},
     plonk::{
         Advice, Column, ConstraintSystem, Constraints, Error, Expression, Fixed, Instance, Selector,
@@ -10,12 +10,12 @@ use halo2_proofs::{
 };
 
 #[derive(Clone)]
-pub struct States<F: FieldExt, const WIDTH: usize>(pub [Data<F>; WIDTH]);
+pub struct States<F: PrimeField, const WIDTH: usize>(pub [Data<F>; WIDTH]);
 
 #[derive(Debug, Clone)]
-pub struct Data<F: FieldExt>(pub AssignedCell<F, F>);
+pub struct Data<F: PrimeField>(pub AssignedCell<F, F>);
 
-pub trait PoseidonInstructions<F: FieldExt, const WIDTH: usize>: Chip<F> {
+pub trait PoseidonInstructions<F: PrimeField, const WIDTH: usize>: Chip<F> {
     /// Variable representing a value.
     type Data;
 
@@ -51,13 +51,13 @@ pub trait PoseidonInstructions<F: FieldExt, const WIDTH: usize>: Chip<F> {
     ) -> Result<(), Error>;
 }
 
-pub struct PoseidonChip<F: FieldExt, const WIDTH: usize> {
+pub struct PoseidonChip<F: PrimeField, const WIDTH: usize> {
     config: PoseidonArthConfig<F, WIDTH>,
     _marker: PhantomData<F>,
 }
 
 #[derive(Clone, Debug)]
-pub struct PoseidonArthConfig<F: FieldExt, const WIDTH: usize> {
+pub struct PoseidonArthConfig<F: PrimeField, const WIDTH: usize> {
     /// one private input for states
     state: [Column<Advice>; WIDTH],
 
@@ -78,7 +78,7 @@ pub struct PoseidonArthConfig<F: FieldExt, const WIDTH: usize> {
     capacity: u128,
 }
 
-impl<F: FieldExt, const WIDTH: usize> PoseidonChip<F, WIDTH> {
+impl<F: PrimeField, const WIDTH: usize> PoseidonChip<F, WIDTH> {
     pub fn new(config: PoseidonArthConfig<F, WIDTH>) -> Self {
         PoseidonChip {
             config,
@@ -154,7 +154,7 @@ impl<F: FieldExt, const WIDTH: usize> PoseidonChip<F, WIDTH> {
                 .map(|i| meta.query_advice(state[i], Rotation::next()))
                 .collect();
             let arcs: Vec<Expression<F>> = (0..WIDTH)
-                .map(|i| meta.query_fixed(arc[i], Rotation::cur()))
+                .map(|i| meta.query_any(arc[i], Rotation::cur()))
                 .collect();
 
             let s_fbox = meta.query_selector(s_fbox);
@@ -176,7 +176,7 @@ impl<F: FieldExt, const WIDTH: usize> PoseidonChip<F, WIDTH> {
                 .map(|i| meta.query_advice(state[i], Rotation::next()))
                 .collect();
             let arcs: Vec<Expression<F>> = (0..WIDTH)
-                .map(|i| meta.query_fixed(arc[i], Rotation::cur()))
+                .map(|i| meta.query_any(arc[i], Rotation::cur()))
                 .collect();
             let s_pbox = meta.query_selector(s_pbox);
             let mut mid = vec![pow_5(states[0].clone() + arcs[0].clone())];
@@ -203,7 +203,7 @@ impl<F: FieldExt, const WIDTH: usize> PoseidonChip<F, WIDTH> {
     }
 }
 
-impl<F: FieldExt, const WIDTH: usize> PoseidonInstructions<F, WIDTH> for PoseidonChip<F, WIDTH> {
+impl<F: PrimeField, const WIDTH: usize> PoseidonInstructions<F, WIDTH> for PoseidonChip<F, WIDTH> {
     type Data = Data<F>;
 
     type State = States<F, WIDTH>;
@@ -211,7 +211,7 @@ impl<F: FieldExt, const WIDTH: usize> PoseidonInstructions<F, WIDTH> for Poseido
     fn initiate(&self, layouter: &mut impl Layouter<F>) -> Result<Self::State, Error> {
         let config = self.config();
         let rate = WIDTH - 1;
-        let mut init = vec![F::zero(); rate];
+        let mut init = vec![F::ZERO; rate];
 
         // capacity element
         init.push(F::from_u128(config.capacity));
@@ -380,7 +380,7 @@ impl<F: FieldExt, const WIDTH: usize> PoseidonInstructions<F, WIDTH> for Poseido
 
                     // apply mds
                     for i in 0..WIDTH {
-                        let mut sum = Value::known(F::zero());
+                        let mut sum = Value::known(F::ZERO);
                         for j in 0..WIDTH {
                             sum = sum + temp[j] * Value::known(config.mds[i][j].clone());
                         }
@@ -436,7 +436,7 @@ impl<F: FieldExt, const WIDTH: usize> PoseidonInstructions<F, WIDTH> for Poseido
     }
 }
 
-impl<F: FieldExt, const WIDTH: usize> Chip<F> for PoseidonChip<F, WIDTH> {
+impl<F: PrimeField, const WIDTH: usize> Chip<F> for PoseidonChip<F, WIDTH> {
     type Config = PoseidonArthConfig<F, WIDTH>;
 
     type Loaded = ();

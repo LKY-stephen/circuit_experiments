@@ -1,4 +1,4 @@
-use halo2_proofs::arithmetic::FieldExt;
+use ff::PrimeField;
 use std::fmt;
 
 /// The type used to hold the MDS matrix and its inverse.
@@ -8,7 +8,7 @@ pub type Mds<F, const WIDTH: usize> = [[F; WIDTH]; WIDTH];
 /// The input should be a field F
 /// the sponge width is WIDTH
 /// Number of full round and partial rounds are fixed
-pub trait Spec<F: FieldExt, const WIDTH: usize>: fmt::Debug + Clone + Default {
+pub trait Spec<F: PrimeField, const WIDTH: usize>: fmt::Debug + Clone + Default {
     /// The number of full rounds for this specification.
     ///
     /// This must be an even number.
