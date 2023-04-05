@@ -257,7 +257,7 @@ impl<F: PrimeField, const I: usize> MerklePathInstruction<F, I> for MerklePathCh
         layouter.assign_region(
             || "load path",
             |mut region: Region<'_, F>| {
-                // from first n row we do the following
+                // for the first m row we do the following
                 //
                 // |  value  | copy | index| s_hash|
                 // |  left1  |  *   |  *   |    0  |
@@ -266,48 +266,7 @@ impl<F: PrimeField, const I: usize> MerklePathInstruction<F, I> for MerklePathCh
                 // ....
                 // hash(i) =  left(i+1) if index =0 else right(i+1)
 
-                for i in 0..n {
-                    let cur_pos = i * 3;
-                    let hash_pos = cur_pos + 2;
-                    for j in 0..I {
-                        left[i][j].copy_advice(
-                            || "assign left",
-                            &mut region,
-                            config.value[j],
-                            cur_pos,
-                        )?;
-                        right[i][j].copy_advice(
-                            || "assign right",
-                            &mut region,
-                            config.value[j],
-                            cur_pos + 1,
-                        )?;
-                        hash[i][j].copy_advice(
-                            || "copy hash",
-                            &mut region,
-                            config.value[j],
-                            hash_pos,
-                        )?;
-                    }
-
-                    config.s_hash.enable(&mut region, hash_pos)?;
-
-                    region.assign_advice(
-                        || "assign copy",
-                        config.copy_flag,
-                        hash_pos,
-                        || copy[i],
-                    )?;
-                }
-
-                // after the pathes are handled, we need to process root
-                //
-                // |  value  | copy | index| s_hash|
-                // |  root   |  *   |  *   |    0  |
-                // |  root   |  *   |  *   |    0  |
-                // |  hash   |  1   |  0   |    1  |
-                // ....
-                for i in n..m {
+                for i in 0..m {
                     let cur_pos = i * 3;
                     let hash_pos = cur_pos + 2;
                     for j in 0..I {
